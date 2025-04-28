@@ -38,11 +38,11 @@ public class RaceGUI extends JFrame {
         top.add(startBtn);
         add(top, BorderLayout.NORTH);
 
-        // Middle: horse name + confidence sliders
+        // Middle: horse inputs
         horseInputPanel = new JPanel(new GridBagLayout());
         add(new JScrollPane(horseInputPanel), BorderLayout.CENTER);
 
-        // Bottom: drawing + stats panel
+        // Bottom: drawing panel
         trackPanel = new TrackPanel();
         add(trackPanel, BorderLayout.SOUTH);
 
@@ -55,7 +55,7 @@ public class RaceGUI extends JFrame {
         setVisible(true);
     }
 
-    // build input rows
+    // Build name + confidence rows
     private void rebuildHorseInputs() {
         horseInputPanel.removeAll();
         int lanes = (Integer)laneCombo.getSelectedItem();
@@ -90,7 +90,7 @@ public class RaceGUI extends JFrame {
         pack();
     }
 
-    // gather inputs, place bet, start race
+    // Gather inputs, place bet, then start
     private void onStart() {
         int trackLen = (Integer)lengthCombo.getSelectedItem();
         String terrain = (String)terrainCombo.getSelectedItem();
@@ -99,17 +99,18 @@ public class RaceGUI extends JFrame {
         for (int i = 0; i < comps.length; i += 4) {
             String name = ((JTextField)comps[i+1]).getText().trim();
             double conf = ((JSlider)comps[i+3]).getValue()/100.0;
+            if (conf <= 0.0) conf = 0.01;  // never allow zero
             horses.add(new Horse(name.charAt(0), name, conf));
         }
 
-        // odds = 1/confidence
+        // Prepare bet options
         String[] betOptions = new String[horses.size()];
         double[] oddsArr = new double[horses.size()];
         for (int i=0; i<horses.size(); i++) {
-            double conf = horses.get(i).getConfidence();
-            double odds = 1.0/conf;
-            oddsArr[i] = odds;
-            betOptions[i] = String.format("%s (odds %.2f×)", horses.get(i).getName(), odds);
+            double c = horses.get(i).getConfidence();
+            double o = 1.0/c;
+            oddsArr[i] = o;
+            betOptions[i] = String.format("%s (odds %.2f×)", horses.get(i).getName(), o);
         }
         JComboBox<String> betCombo = new JComboBox<>(betOptions);
         JTextField betField = new JTextField("100",7);
@@ -117,14 +118,15 @@ public class RaceGUI extends JFrame {
         betPanel.add(new JLabel("Bet on:")); betPanel.add(betCombo);
         betPanel.add(new JLabel("Amount:")); betPanel.add(betField);
 
-        int choice = JOptionPane.showConfirmDialog(
-                this, betPanel, "Place your bet", JOptionPane.OK_CANCEL_OPTION);
-        if (choice!=JOptionPane.OK_OPTION) return;
+        if (JOptionPane.showConfirmDialog(
+                this, betPanel, "Place your bet", JOptionPane.OK_CANCEL_OPTION
+        ) != JOptionPane.OK_OPTION) return;
+
         int betIdx; double betAmt;
         try {
             betIdx = betCombo.getSelectedIndex();
             betAmt = Double.parseDouble(betField.getText().trim());
-            if (betAmt<=0) throw new NumberFormatException();
+            if (betAmt <= 0) throw new NumberFormatException();
         } catch(Exception ex) {
             JOptionPane.showMessageDialog(this,"Invalid bet.");
             return;
@@ -138,9 +140,10 @@ public class RaceGUI extends JFrame {
         for (Component comp: horseInputPanel.getComponents()) comp.setEnabled(false);
         startBtn.setEnabled(false);
 
-        // start
+        // start race
         trackPanel.setupRace(
-                horses, trackLen, terrain, betIdx, betAmt, betOdds,
+                horses, trackLen, terrain,
+                betIdx, betAmt, betOdds,
                 () -> {
                     laneCombo.setEnabled(true);
                     lengthCombo.setEnabled(true);
@@ -153,6 +156,8 @@ public class RaceGUI extends JFrame {
     }
 
     // -------------------------------------------------------------------
+    // Panel that draws & animates the race
+    // -------------------------------------------------------------------
     private static class TrackPanel extends JPanel {
         private List<Horse> horses;
         private int trackLen;
@@ -162,6 +167,10 @@ public class RaceGUI extends JFrame {
         private double betAmt, betOdds;
         private Runnable onFinish;
         private long startTime;
+
+        private String eventMessage;
+        private long eventTimeMs;
+        private int[] frozenFrames;
 
         public TrackPanel() {
             setPreferredSize(new Dimension(800,300));
@@ -184,80 +193,97 @@ public class RaceGUI extends JFrame {
             this.betOdds = betOdds;
             this.onFinish = onFinish;
             horses.forEach(Horse::goBackToStart);
+            this.eventMessage = null;
+            this.frozenFrames = new int[horses.size()];
 
-            if (timer!=null) timer.stop();
+            if (timer != null) timer.stop();
             startTime = System.currentTimeMillis();
             timer = new Timer(30, e->step());
             timer.start();
         }
 
         private void step() {
-            // choose increment factor by terrain
             double baseInc = 0.000002;
             double factor = terrain.equals("Muddy") ? 0.5
                     : terrain.equals("Icy")   ? 0.25
                     : 1.0;
-            double slipProb = terrain.equals("Icy") ? 0.005 : 0.0;
+            double slipProb = terrain.equals("Icy")   ? 0.005 : 0.0;
+            double tripProb = terrain.equals("Muddy") ? 0.005 : 0.0;
 
-            for (Horse h : horses) {
-                if (!h.hasFallen()) {
-                    if (Math.random() < h.getConfidence()) {
-                        h.moveForward();
-                        if (h.getDistanceTravelled()%10==0) {
-                            h.setConfidence(Math.min(
-                                    1.0,
-                                    h.getConfidence() + baseInc*factor
-                            ));
-                        }
-                    }
-                    // falls
-                    double fallProb = 0.001*h.getConfidence()*h.getConfidence();
-                    if (Math.random()<fallProb) {
-                        h.fall();
-                    }
-                    // icy slip
-                    if (slipProb>0 && Math.random()<slipProb) {
-                        h.setConfidence(Math.max(0.0, h.getConfidence()-0.2));
+            for (int i = 0; i < horses.size(); i++) {
+                Horse h = horses.get(i);
+
+                if (frozenFrames[i] > 0) {
+                    frozenFrames[i]--;
+                    continue;
+                }
+                if (h.hasFallen()) continue;
+
+                // move
+                if (Math.random() < h.getConfidence()) {
+                    h.moveForward();
+                    if (h.getDistanceTravelled() % 10 == 0) {
+                        double newConf = h.getConfidence() + baseInc * factor;
+                        h.setConfidence(Math.max(0.01, Math.min(1.0, newConf)));
                     }
                 }
+                // fall
+                double fallProb = 0.001 * h.getConfidence() * h.getConfidence();
+                if (Math.random() < fallProb) {
+                    h.fall();
+                }
+                // icy slip
+                if (slipProb > 0 && Math.random() < slipProb) {
+                    double newConf = h.getConfidence() - 0.2;
+                    h.setConfidence(Math.max(0.01, newConf));
+                    frozenFrames[i] = 5;
+                    eventMessage = h.getName() + " slipped on the ice!";
+                    eventTimeMs = System.currentTimeMillis();
+                }
+                // muddy trip
+                if (tripProb > 0 && Math.random() < tripProb) {
+                    double newConf = h.getConfidence() - 0.15;
+                    h.setConfidence(Math.max(0.01, newConf));
+                    frozenFrames[i] = 5;
+                    eventMessage = h.getName() + " tripped in the mud!";
+                    eventTimeMs = System.currentTimeMillis();
+                }
             }
+
             repaint();
 
             boolean anyWin = horses.stream()
-                    .anyMatch(h->h.getDistanceTravelled()>=trackLen);
+                    .anyMatch(h -> h.getDistanceTravelled() >= trackLen);
             boolean allFall = horses.stream()
                     .allMatch(Horse::hasFallen);
 
-            if (anyWin||allFall) {
+            if (anyWin || allFall) {
                 timer.stop();
-                long duration = System.currentTimeMillis()-startTime;
-                Horse winner=null;
+                Horse winner = null;
                 if (anyWin) {
                     winner = horses.stream()
                             .filter(h->h.getDistanceTravelled()>=trackLen)
                             .findFirst().get();
-                    JOptionPane.showMessageDialog(this,
-                            "🏆 "+winner.getName()+" wins!");
+                    JOptionPane.showMessageDialog(
+                            this, "🏆 " + winner.getName() + " wins!"
+                    );
                 } else {
-                    JOptionPane.showMessageDialog(this,
-                            "❌ All horses fell!");
+                    JOptionPane.showMessageDialog(
+                            this, "❌ All horses fell!"
+                    );
                 }
-                if (winner!=null && horses.indexOf(winner)==betIdx) {
-                    JOptionPane.showMessageDialog(this,
-                            String.format("You won! Payout: %.2f", betAmt*betOdds));
+                if (winner != null && horses.indexOf(winner) == betIdx) {
+                    double payout = betAmt * betOdds;
+                    JOptionPane.showMessageDialog(
+                            this,
+                            String.format("You won! Payout: %.2f", payout)
+                    );
                 } else {
-                    JOptionPane.showMessageDialog(this,
-                            String.format("You lost your bet of %.2f", betAmt));
+                    JOptionPane.showMessageDialog(
+                            this,
+                            String.format("You lost your bet of %.2f", betAmt)
+                    );
                 }
-                StringBuilder stats=new StringBuilder();
-                stats.append(String.format(
-                        "Duration: %.2f s%n", duration/1000.0));
-                stats.append("Final distances:\n");
-                for (Horse h:horses) {
-                    stats.append(String.format("%s: %d px%n",
-                            h.getName(),h.getDistanceTravelled()));
-                }
-                JOptionPane.showMessageDialog(this,stats.toString());
                 onFinish.run();
             }
         }
@@ -265,46 +291,58 @@ public class RaceGUI extends JFrame {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            if (horses==null) return;
-            int hgt=getHeight(), lanes=horses.size();
-            int laneY=hgt/(lanes+1);
-            Graphics2D g2=(Graphics2D)g;
-            Font horseF=new Font("Segoe UI Emoji",Font.PLAIN,40);
-            Font infoF=new Font("SansSerif",Font.PLAIN,12);
+            if (horses == null) return;
 
-            // lanes
+            int hgt = getHeight(), lanes = horses.size();
+            int laneY = hgt / (lanes + 1);
+
+            Graphics2D g2 = (Graphics2D)g;
+            Font horseF = new Font("Segoe UI Emoji", Font.PLAIN, 40);
+            Font infoF  = new Font("SansSerif", Font.PLAIN, 12);
+
+            // draw lanes
             g2.setColor(Color.LIGHT_GRAY);
-            for (int i=1;i<=lanes;i++){
-                int y=i*laneY;
-                g2.drawLine(10,y,10+trackLen,y);
+            for (int i=1; i<=lanes; i++) {
+                int y = i * laneY;
+                g2.drawLine(10, y, 10 + trackLen, y);
             }
 
-            // horses
-            for (int i=0;i<lanes;i++){
-                Horse hr=horses.get(i);
-                int x=10+hr.getDistanceTravelled();
-                int y=(i+1)*laneY;
+            // event message for 2 seconds
+            if (eventMessage != null &&
+                    System.currentTimeMillis() - eventTimeMs < 2000) {
+                g2.setFont(infoF);
+                g2.setColor(Color.BLUE);
+                g2.drawString(eventMessage, 10, 20);
+            }
+
+            // draw each horse
+            for (int i=0; i<lanes; i++) {
+                Horse hr = horses.get(i);
+                int x = 10 + hr.getDistanceTravelled();
+                int y = (i+1) * laneY;
+
                 if (hr.hasFallen()) {
-                    g2.setFont(new Font("SansSerif",Font.BOLD,40));
+                    g2.setFont(new Font("SansSerif", Font.BOLD, 40));
                     g2.setColor(Color.RED);
-                    g2.drawString("❌",x-20,y+20);
+                    g2.drawString("❌", x-20, y+20);
                 } else {
-                    String horse="🐎";
+                    String horse = "🐎";
                     g2.setFont(horseF);
-                    int fw=g2.getFontMetrics().stringWidth(horse);
-                    AffineTransform old=g2.getTransform();
-                    g2.translate(x+fw,y-20);
-                    g2.scale(-1,1);
+                    int fw = g2.getFontMetrics().stringWidth(horse);
+                    AffineTransform old = g2.getTransform();
+                    g2.translate(x+fw, y-20);
+                    g2.scale(-1, 1);
                     g2.setColor(Color.BLACK);
-                    g2.drawString(horse,0,0);
+                    g2.drawString(horse, 0, 0);
                     g2.setTransform(old);
                 }
+
                 g2.setFont(infoF);
                 g2.setColor(Color.BLACK);
-                g2.drawString(hr.getName(),x+30,y+4);
+                g2.drawString(hr.getName(), x+30, y+4);
                 g2.drawString(
-                        String.format("Conf: %.2f",hr.getConfidence()),
-                        x+30,y+18
+                        String.format("Conf: %.2f", hr.getConfidence()),
+                        x+30, y+18
                 );
             }
         }
