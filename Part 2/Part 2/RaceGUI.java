@@ -10,6 +10,7 @@ import java.util.ArrayList;
 public class RaceGUI extends JFrame {
     private JComboBox<Integer> laneCombo;
     private JComboBox<Integer> lengthCombo;
+    private JComboBox<String> terrainCombo;
     private JPanel horseInputPanel;
     private JButton startBtn;
     private TrackPanel trackPanel;
@@ -19,7 +20,7 @@ public class RaceGUI extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout(5,5));
 
-        // Top: lanes + track length selection
+        // Top: lanes, track length, terrain
         JPanel top = new JPanel();
         top.add(new JLabel("Lanes:"));
         laneCombo = new JComboBox<>(new Integer[]{2,3,4,5,6});
@@ -28,6 +29,10 @@ public class RaceGUI extends JFrame {
         top.add(new JLabel("Track (px):"));
         lengthCombo = new JComboBox<>(new Integer[]{200,300,400,500,600,700});
         top.add(lengthCombo);
+
+        top.add(new JLabel("Terrain:"));
+        terrainCombo = new JComboBox<>(new String[]{"Normal","Muddy","Icy"});
+        top.add(terrainCombo);
 
         startBtn = new JButton("Start Race");
         top.add(startBtn);
@@ -50,7 +55,7 @@ public class RaceGUI extends JFrame {
         setVisible(true);
     }
 
-    // Build input rows for each horse
+    // build input rows
     private void rebuildHorseInputs() {
         horseInputPanel.removeAll();
         int lanes = (Integer)laneCombo.getSelectedItem();
@@ -85,9 +90,10 @@ public class RaceGUI extends JFrame {
         pack();
     }
 
-    // Gather inputs, show odds and betting, then start the race
+    // gather inputs, place bet, start race
     private void onStart() {
         int trackLen = (Integer)lengthCombo.getSelectedItem();
+        String terrain = (String)terrainCombo.getSelectedItem();
         List<Horse> horses = new ArrayList<>();
         Component[] comps = horseInputPanel.getComponents();
         for (int i = 0; i < comps.length; i += 4) {
@@ -96,56 +102,50 @@ public class RaceGUI extends JFrame {
             horses.add(new Horse(name.charAt(0), name, conf));
         }
 
-        // prepare betting options with odds = 1/confidence
+        // odds = 1/confidence
         String[] betOptions = new String[horses.size()];
-        double[] oddsArr     = new double[horses.size()];
-        for (int i = 0; i < horses.size(); i++) {
+        double[] oddsArr = new double[horses.size()];
+        for (int i=0; i<horses.size(); i++) {
             double conf = horses.get(i).getConfidence();
-            double odds = 1.0 / conf;
+            double odds = 1.0/conf;
             oddsArr[i] = odds;
-            betOptions[i] = String.format(
-                    "%s (odds %.2f×)", horses.get(i).getName(), odds);
+            betOptions[i] = String.format("%s (odds %.2f×)", horses.get(i).getName(), odds);
         }
-
         JComboBox<String> betCombo = new JComboBox<>(betOptions);
-        JTextField betField = new JTextField("100", 7);
+        JTextField betField = new JTextField("100",7);
         JPanel betPanel = new JPanel();
-        betPanel.add(new JLabel("Bet on:"));
-        betPanel.add(betCombo);
-        betPanel.add(new JLabel("Amount:"));
-        betPanel.add(betField);
+        betPanel.add(new JLabel("Bet on:")); betPanel.add(betCombo);
+        betPanel.add(new JLabel("Amount:")); betPanel.add(betField);
 
         int choice = JOptionPane.showConfirmDialog(
                 this, betPanel, "Place your bet", JOptionPane.OK_CANCEL_OPTION);
-        if (choice != JOptionPane.OK_OPTION) return;
-        int betIdx;
-        double betAmt;
+        if (choice!=JOptionPane.OK_OPTION) return;
+        int betIdx; double betAmt;
         try {
             betIdx = betCombo.getSelectedIndex();
             betAmt = Double.parseDouble(betField.getText().trim());
-            if (betAmt <= 0) throw new NumberFormatException();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Invalid bet.");
+            if (betAmt<=0) throw new NumberFormatException();
+        } catch(Exception ex) {
+            JOptionPane.showMessageDialog(this,"Invalid bet.");
             return;
         }
         double betOdds = oddsArr[betIdx];
 
-        // disable controls during race
+        // disable controls
         laneCombo.setEnabled(false);
         lengthCombo.setEnabled(false);
-        for (Component comp : horseInputPanel.getComponents())
-            comp.setEnabled(false);
+        terrainCombo.setEnabled(false);
+        for (Component comp: horseInputPanel.getComponents()) comp.setEnabled(false);
         startBtn.setEnabled(false);
 
-        // start race with betting info
+        // start
         trackPanel.setupRace(
-                horses, trackLen, betIdx, betAmt, betOdds,
+                horses, trackLen, terrain, betIdx, betAmt, betOdds,
                 () -> {
-                    // re-enable when done
                     laneCombo.setEnabled(true);
                     lengthCombo.setEnabled(true);
-                    for (Component comp : horseInputPanel.getComponents())
-                        comp.setEnabled(true);
+                    terrainCombo.setEnabled(true);
+                    for (Component comp: horseInputPanel.getComponents()) comp.setEnabled(true);
                     startBtn.setEnabled(true);
                 }
         );
@@ -153,11 +153,10 @@ public class RaceGUI extends JFrame {
     }
 
     // -------------------------------------------------------------------
-    // Panel that draws, animates, and displays end-of-race stats
-    // -------------------------------------------------------------------
     private static class TrackPanel extends JPanel {
         private List<Horse> horses;
         private int trackLen;
+        private String terrain;
         private Timer timer;
         private int betIdx;
         private double betAmt, betOdds;
@@ -171,6 +170,7 @@ public class RaceGUI extends JFrame {
         public void setupRace(
                 List<Horse> horses,
                 int length,
+                String terrain,
                 int betIdx,
                 double betAmt,
                 double betOdds,
@@ -178,101 +178,86 @@ public class RaceGUI extends JFrame {
         ) {
             this.horses = horses;
             this.trackLen = length;
+            this.terrain = terrain;
             this.betIdx = betIdx;
             this.betAmt = betAmt;
             this.betOdds = betOdds;
             this.onFinish = onFinish;
             horses.forEach(Horse::goBackToStart);
 
-            if (timer != null) timer.stop();
+            if (timer!=null) timer.stop();
             startTime = System.currentTimeMillis();
-            timer = new Timer(30, e -> step());
+            timer = new Timer(30, e->step());
             timer.start();
         }
 
         private void step() {
+            // choose increment factor by terrain
+            double baseInc = 0.000002;
+            double factor = terrain.equals("Muddy") ? 0.5
+                    : terrain.equals("Icy")   ? 0.25
+                    : 1.0;
+            double slipProb = terrain.equals("Icy") ? 0.005 : 0.0;
+
             for (Horse h : horses) {
                 if (!h.hasFallen()) {
                     if (Math.random() < h.getConfidence()) {
                         h.moveForward();
-                        if (h.getDistanceTravelled() % 10 == 0) {
+                        if (h.getDistanceTravelled()%10==0) {
                             h.setConfidence(Math.min(
                                     1.0,
-                                    h.getConfidence() + 0.000002
+                                    h.getConfidence() + baseInc*factor
                             ));
                         }
                     }
-                    double fallProb = 0.001 * h.getConfidence() * h.getConfidence();
-                    if (Math.random() < fallProb) {
+                    // falls
+                    double fallProb = 0.001*h.getConfidence()*h.getConfidence();
+                    if (Math.random()<fallProb) {
                         h.fall();
+                    }
+                    // icy slip
+                    if (slipProb>0 && Math.random()<slipProb) {
+                        h.setConfidence(Math.max(0.0, h.getConfidence()-0.2));
                     }
                 }
             }
             repaint();
 
             boolean anyWin = horses.stream()
-                    .anyMatch(h -> h.getDistanceTravelled() >= trackLen);
+                    .anyMatch(h->h.getDistanceTravelled()>=trackLen);
             boolean allFall = horses.stream()
                     .allMatch(Horse::hasFallen);
 
-            if (anyWin || allFall) {
+            if (anyWin||allFall) {
                 timer.stop();
-                long endTime = System.currentTimeMillis();
-                long durationMs = endTime - startTime;
-                Horse winner = null;
+                long duration = System.currentTimeMillis()-startTime;
+                Horse winner=null;
                 if (anyWin) {
                     winner = horses.stream()
                             .filter(h->h.getDistanceTravelled()>=trackLen)
                             .findFirst().get();
-                }
-
-                // announce winner
-                if (winner != null) {
-                    JOptionPane.showMessageDialog(
-                            this, "🏆 " + winner.getName() + " wins!"
-                    );
+                    JOptionPane.showMessageDialog(this,
+                            "🏆 "+winner.getName()+" wins!");
                 } else {
-                    JOptionPane.showMessageDialog(
-                            this, "❌ All horses fell!"
-                    );
+                    JOptionPane.showMessageDialog(this,
+                            "❌ All horses fell!");
                 }
-
-                // betting result
-                if (winner != null && horses.indexOf(winner) == betIdx) {
-                    double payout = betAmt * betOdds;
-                    JOptionPane.showMessageDialog(
-                            this,
-                            String.format("You won! Payout: %.2f", payout)
-                    );
+                if (winner!=null && horses.indexOf(winner)==betIdx) {
+                    JOptionPane.showMessageDialog(this,
+                            String.format("You won! Payout: %.2f", betAmt*betOdds));
                 } else {
-                    JOptionPane.showMessageDialog(
-                            this,
-                            String.format("You lost your bet of %.2f", betAmt)
-                    );
+                    JOptionPane.showMessageDialog(this,
+                            String.format("You lost your bet of %.2f", betAmt));
                 }
-
-                // show stats
-                StringBuilder stats = new StringBuilder();
+                StringBuilder stats=new StringBuilder();
                 stats.append(String.format(
-                        "Race duration: %.2f seconds%n",
-                        durationMs/1000.0
-                ));
-                if (winner != null) {
-                    stats.append(String.format(
-                            "Winner finish time: %.2f seconds%n%n",
-                            durationMs/1000.0
-                    ));
-                }
+                        "Duration: %.2f s%n", duration/1000.0));
                 stats.append("Final distances:\n");
-                for (Horse h : horses) {
-                    stats.append(String.format(
-                            "%s: %d px%n",
-                            h.getName(),
-                            h.getDistanceTravelled()
-                    ));
+                for (Horse h:horses) {
+                    stats.append(String.format("%s: %d px%n",
+                            h.getName(),h.getDistanceTravelled()));
                 }
-                JOptionPane.showMessageDialog(this, stats.toString());
-
+                JOptionPane.showMessageDialog(this,stats.toString());
                 onFinish.run();
             }
         }
@@ -280,51 +265,46 @@ public class RaceGUI extends JFrame {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            if (horses == null) return;
+            if (horses==null) return;
+            int hgt=getHeight(), lanes=horses.size();
+            int laneY=hgt/(lanes+1);
+            Graphics2D g2=(Graphics2D)g;
+            Font horseF=new Font("Segoe UI Emoji",Font.PLAIN,40);
+            Font infoF=new Font("SansSerif",Font.PLAIN,12);
 
-            int hgt = getHeight(), lanes = horses.size();
-            int laneY = hgt / (lanes + 1);
-
-            Graphics2D g2 = (Graphics2D)g;
-            Font emojiFont = new Font("Segoe UI Emoji",Font.PLAIN,40);
-            Font infoFont  = new Font("SansSerif",Font.PLAIN,12);
-
-            // draw lanes
+            // lanes
             g2.setColor(Color.LIGHT_GRAY);
-            for (int i = 1; i <= lanes; i++) {
-                int y = i * laneY;
-                g2.drawLine(10, y, 10 + trackLen, y);
+            for (int i=1;i<=lanes;i++){
+                int y=i*laneY;
+                g2.drawLine(10,y,10+trackLen,y);
             }
 
-            // draw each horse
-            for (int i = 0; i < lanes; i++) {
-                Horse hr = horses.get(i);
-                int x = 10 + hr.getDistanceTravelled();
-                int y = (i+1)*laneY;
-
+            // horses
+            for (int i=0;i<lanes;i++){
+                Horse hr=horses.get(i);
+                int x=10+hr.getDistanceTravelled();
+                int y=(i+1)*laneY;
                 if (hr.hasFallen()) {
                     g2.setFont(new Font("SansSerif",Font.BOLD,40));
                     g2.setColor(Color.RED);
-                    g2.drawString("❌", x-20, y+20);
+                    g2.drawString("❌",x-20,y+20);
                 } else {
-                    String horse = "🐎";
-                    g2.setFont(emojiFont);
-                    int fw = g2.getFontMetrics().stringWidth(horse);
-                    AffineTransform old = g2.getTransform();
-                    g2.translate(x+fw, y-20);
+                    String horse="🐎";
+                    g2.setFont(horseF);
+                    int fw=g2.getFontMetrics().stringWidth(horse);
+                    AffineTransform old=g2.getTransform();
+                    g2.translate(x+fw,y-20);
                     g2.scale(-1,1);
                     g2.setColor(Color.BLACK);
                     g2.drawString(horse,0,0);
                     g2.setTransform(old);
                 }
-
-                // name + real-time confidence
-                g2.setFont(infoFont);
+                g2.setFont(infoF);
                 g2.setColor(Color.BLACK);
-                g2.drawString(hr.getName(), x+30, y+4);
+                g2.drawString(hr.getName(),x+30,y+4);
                 g2.drawString(
-                        String.format("Conf: %.2f", hr.getConfidence()),
-                        x+30, y+18
+                        String.format("Conf: %.2f",hr.getConfidence()),
+                        x+30,y+18
                 );
             }
         }
