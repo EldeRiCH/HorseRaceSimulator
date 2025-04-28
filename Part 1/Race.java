@@ -76,10 +76,7 @@ public class Race {
                     break;
                 }
             }
-            // or did everyone take a tumble?
-            if (!finished && allHorsesFallen()) {
-                finished = true;
-            }
+
 
             // slow it down so we can watch
             try {
@@ -89,15 +86,7 @@ public class Race {
             }
         }
 
-        // announce the result
-        System.out.println();
-        for (Horse horse : lanes) {
-            if (horse != null && raceWonBy(horse)) {
-                System.out.println("🏆 And the winner is " + horse.getName() + "! 🏆");
-                return;
-            }
-        }
-        System.out.println("💥 All horses fell! 💥");
+
     }
 
     /**
@@ -126,17 +115,7 @@ public class Race {
         return theHorse.getDistanceTravelled() >= raceLength;
     }
 
-    /**
-     * Check if every horse has fallen.
-     */
-    private boolean allHorsesFallen() {
-        for (Horse horse : lanes) {
-            if (horse != null && !horse.hasFallen()) {
-                return false;
-            }
-        }
-        return true;
-    }
+
 
     /**
      * Clear screen using ANSI codes.
@@ -196,16 +175,7 @@ public class Race {
         }
     }
 
-    /**
-     * Reset all horses to the start without changing confidence.
-     */
-    public void resetRace() {
-        for (Horse horse : lanes) {
-            if (horse != null) {
-                horse.goBackToStart();
-            }
-        }
-    }
+
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
 
