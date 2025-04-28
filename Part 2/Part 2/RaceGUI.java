@@ -5,12 +5,11 @@ import javax.swing.JPanel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JTextField;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JOptionPane;
 import javax.swing.Timer;
-import javax.swing.JTextField;
-
 
 import java.awt.BorderLayout;
 import java.awt.GridBagLayout;
@@ -40,7 +39,7 @@ public class RaceGUI extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout(5,5));
 
-        // Top panel: choose lanes and track length
+        // Top controls: lanes and track length
         JPanel top = new JPanel();
         top.add(new JLabel("Lanes:"));
         laneCombo = new JComboBox<>(new Integer[]{2,3,4,5,6});
@@ -58,14 +57,14 @@ public class RaceGUI extends JFrame {
         horseInputPanel = new JPanel(new GridBagLayout());
         add(new JScrollPane(horseInputPanel), BorderLayout.CENTER);
 
-        // Bottom: where we draw the race
+        // Bottom: drawing panel
         trackPanel = new TrackPanel();
         add(trackPanel, BorderLayout.SOUTH);
 
-        // Rebuild input fields when number of lanes changes
+        // rebuild inputs when lane count changes
         laneCombo.addActionListener(e -> rebuildHorseInputs());
 
-        // When Start is clicked, gather data and launch animation
+        // start race when button clicked
         startBtn.addActionListener(e -> onStart());
 
         rebuildHorseInputs();
@@ -74,10 +73,10 @@ public class RaceGUI extends JFrame {
         setVisible(true);
     }
 
-    // Rebuilds the rows of [Name][Confidence] based on lane count
+    // build the name/confidence input rows
     private void rebuildHorseInputs() {
         horseInputPanel.removeAll();
-        int lanes = (Integer) laneCombo.getSelectedItem();
+        int lanes = (Integer)laneCombo.getSelectedItem();
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(4,4,4,4);
         c.gridy = 0;
@@ -97,18 +96,16 @@ public class RaceGUI extends JFrame {
 
             c.gridy++;
         }
-
         horseInputPanel.revalidate();
         horseInputPanel.repaint();
         pack();
     }
 
-    // Called when Start Race is pressed
+    // collect inputs and start the race
     private void onStart() {
-        int length = (Integer) lengthCombo.getSelectedItem();
-        int lanes  = (Integer) laneCombo.getSelectedItem();
+        int length = (Integer)lengthCombo.getSelectedItem();
+        int lanes  = (Integer)laneCombo.getSelectedItem();
 
-        // build Horse objects from the input fields
         List<Horse> horses = new ArrayList<>();
         Component[] comps = horseInputPanel.getComponents();
         for (int i = 0; i < comps.length; i += 4) {
@@ -118,45 +115,43 @@ public class RaceGUI extends JFrame {
                 conf = Double.parseDouble(((JTextField)comps[i+3]).getText().trim());
                 if (conf < 0 || conf > 1) throw new NumberFormatException();
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "Confidence must be 0–1.");
+                JOptionPane.showMessageDialog(this, "Confidence must be between 0 and 1.");
                 return;
             }
             horses.add(new Horse(name.charAt(0), name, conf));
         }
 
-        // disable inputs during the race
+        // disable inputs during race
         laneCombo.setEnabled(false);
         lengthCombo.setEnabled(false);
         for (Component comp : horseInputPanel.getComponents())
             comp.setEnabled(false);
         startBtn.setEnabled(false);
 
-        // start animation, re-enable on complete
-        trackPanel.setupRace(horses, length, ()-> {
+        // start animation, re-enable when done
+        trackPanel.setupRace(horses, length, () -> {
             laneCombo.setEnabled(true);
             lengthCombo.setEnabled(true);
             for (Component comp : horseInputPanel.getComponents())
                 comp.setEnabled(true);
             startBtn.setEnabled(true);
         });
-
         pack();
     }
 
-    // ------------------------------------------------------------------------
-    // Inner panel where the race is drawn
-    // ------------------------------------------------------------------------
+    // -------------------------------------------------------------------
+    // Panel that draws and animates the horses
+    // -------------------------------------------------------------------
     private static class TrackPanel extends JPanel {
         private List<Horse> horses;
         private int trackLen;
-        private Timer timer;            // javax.swing.Timer
+        private Timer timer;        // javax.swing.Timer
         private Runnable onFinish;
 
         public TrackPanel() {
-            setPreferredSize(new Dimension(800, 400));
+            setPreferredSize(new Dimension(800, 300));
         }
 
-        // Configure and launch the timer
         public void setupRace(List<Horse> horses, int length, Runnable onFinish) {
             this.horses = horses;
             this.trackLen = length;
@@ -168,27 +163,26 @@ public class RaceGUI extends JFrame {
             timer.start();
         }
 
-        // Called on each Timer tick
+        // called on each tick
         private void step() {
             for (Horse h : horses) {
                 if (!h.hasFallen()) {
-                    // try to move forward
                     if (Math.random() < h.getConfidence()) {
                         h.moveForward();
-                        // boost confidence slightly
+                        // increase confidence slightly
                         h.setConfidence(Math.min(1, h.getConfidence() + 0.01));
                     }
-                    // small chance to fall
-                    if (Math.random() < 0.1 * h.getConfidence() * h.getConfidence()) {
+                    // much rarer falls
+                    double fallProb = 0.02 * h.getConfidence() * h.getConfidence();
+                    if (Math.random() < fallProb) {
                         h.fall();
-                        // drop confidence
+                        // decrease confidence
                         h.setConfidence(Math.max(0, h.getConfidence() - 0.1));
                     }
                 }
             }
             repaint();
 
-            // check for winner or everyone fallen
             boolean anyWin = horses.stream()
                     .anyMatch(h -> h.getDistanceTravelled() >= trackLen);
             boolean allFall = horses.stream()
@@ -203,7 +197,7 @@ public class RaceGUI extends JFrame {
                             .findFirst().get();
                     msg = "🏆 " + win.getName() + " wins!";
                 } else {
-                    msg = "💥 All fell—no winner!";
+                    msg = "❌ All horses fell!";
                 }
                 JOptionPane.showMessageDialog(this, msg);
                 onFinish.run();
@@ -226,16 +220,27 @@ public class RaceGUI extends JFrame {
                 g.drawLine(10, y, 10 + trackLen, y);
             }
 
-            // draw each horse as a circle + name
+            // draw horses
             for (int i = 0; i < lanes; i++) {
                 Horse hr = horses.get(i);
                 int x = 10 + hr.getDistanceTravelled();
                 int y = (i+1) * laneY;
-                g.setColor(new Color(50,50,200));
-                g.fillOval(x, y-8, 16,16);
-                g.setColor(Color.BLACK);
+
+                if (hr.hasFallen()) {
+                    // fallen marker
+                    g.setFont(new Font("SansSerif", Font.BOLD, 20));
+                    g.setColor(Color.RED);
+                    g.drawString("❌", x-8, y+8);
+                } else {
+                    // moving circle
+                    g.setColor(new Color(50,50,200));
+                    g.fillOval(x, y-8, 16,16);
+                }
+
+                // draw name next to horse
                 g.setFont(new Font("SansSerif",Font.PLAIN,12));
-                g.drawString(hr.getName(), x+20, y+4);
+                g.setColor(Color.BLACK);
+                g.drawString(hr.getName(), x + 20, y + 4);
             }
         }
     }
