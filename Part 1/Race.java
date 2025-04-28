@@ -89,8 +89,17 @@ public class Race {
                 Thread.currentThread().interrupt();
             }
 
-        }
 
+        }
+        // announce the result
+        System.out.println();
+        for (Horse horse : lanes) {
+            if (horse != null && raceWonBy(horse)) {
+                System.out.println("🏆 And the winner is " + horse.getName() + "! 🏆");
+                return;
+            }
+        }
+        System.out.println("💥 All horses fell! 💥");
 
     }
 
