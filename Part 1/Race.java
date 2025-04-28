@@ -3,7 +3,6 @@ import java.lang.Math;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Arrays;
-import java.util.Scanner;
 
 /**
  * A simple horse race simulation with 2–6 lanes.
@@ -17,17 +16,16 @@ public class Race {
 
     /**
      * Create a new race.
-     *
-     * @param distance length of track in steps
-     * @param lanes    number of lanes (2–6)
+     * @param distance  length of track in steps
+     * @param lanes     number of lanes (2–6)
      */
     public Race(int distance, int lanes) {
         if (lanes < 2 || lanes > 6) {
             throw new IllegalArgumentException("Need between 2 and 6 lanes");
         }
-        this.raceLength = distance;
+        this.raceLength    = distance;
         this.numberOfLanes = lanes;
-        this.lanes = new ArrayList<>();
+        this.lanes         = new ArrayList<>();
         for (int i = 0; i < lanes; i++) {
             this.lanes.add(null);
         }
@@ -80,19 +78,25 @@ public class Race {
             // or did everyone take a tumble?
             if (!finished && allHorsesFallen()) {
                 finished = true;
-
-
-                // slow it down so we can watch
-                try {
-                    TimeUnit.MILLISECONDS.sleep(100);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-
             }
 
-
+            // slow it down so we can watch
+            try {
+                TimeUnit.MILLISECONDS.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
+
+        // announce the result
+        System.out.println();
+        for (Horse horse : lanes) {
+            if (horse != null && raceWonBy(horse)) {
+                System.out.println("🏆 And the winner is " + horse.getName() + "! 🏆");
+                return;
+            }
+        }
+        System.out.println("💥 All horses fell! 💥");
     }
 
     /**
@@ -133,7 +137,6 @@ public class Race {
         return true;
     }
 
-
     /**
      * Clear screen using ANSI codes.
      */
@@ -167,7 +170,7 @@ public class Race {
      */
     private void printLane(Horse theHorse) {
         int rawPos = theHorse.getDistanceTravelled();
-        int idx = Math.min(rawPos, raceLength - 1);
+        int idx    = Math.min(rawPos, raceLength - 1);
 
         // make a blank track of fixed length
         char[] track = new char[raceLength];
