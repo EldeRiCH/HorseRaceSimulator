@@ -17,12 +17,14 @@ import java.awt.GridBagConstraints;
 import java.awt.Insets;
 import java.awt.Dimension;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Component;
+import java.awt.geom.AffineTransform;
 
-import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -39,32 +41,29 @@ public class RaceGUI extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout(5,5));
 
-        // Top controls: lanes and track length
+        // Top controls: lane count and track length dropdowns
         JPanel top = new JPanel();
         top.add(new JLabel("Lanes:"));
         laneCombo = new JComboBox<>(new Integer[]{2,3,4,5,6});
         top.add(laneCombo);
 
         top.add(new JLabel("Track (px):"));
-        lengthCombo = new JComboBox<>(new Integer[]{200,400,600,800,1000});
+        lengthCombo = new JComboBox<>(new Integer[]{200,300,400,500,600,700});
         top.add(lengthCombo);
 
         startBtn = new JButton("Start Race");
         top.add(startBtn);
         add(top, BorderLayout.NORTH);
 
-        // Middle: horse name + confidence inputs
+        // Middle: inputs for each horse's name and confidence
         horseInputPanel = new JPanel(new GridBagLayout());
         add(new JScrollPane(horseInputPanel), BorderLayout.CENTER);
 
-        // Bottom: drawing panel
+        // Bottom: where the race is drawn
         trackPanel = new TrackPanel();
         add(trackPanel, BorderLayout.SOUTH);
 
-        // rebuild inputs when lane count changes
         laneCombo.addActionListener(e -> rebuildHorseInputs());
-
-        // start race when button clicked
         startBtn.addActionListener(e -> onStart());
 
         rebuildHorseInputs();
@@ -73,7 +72,7 @@ public class RaceGUI extends JFrame {
         setVisible(true);
     }
 
-    // build the name/confidence input rows
+    // Build rows of [Name][Confidence] fields based on selected lanes
     private void rebuildHorseInputs() {
         horseInputPanel.removeAll();
         int lanes = (Integer)laneCombo.getSelectedItem();
@@ -84,30 +83,28 @@ public class RaceGUI extends JFrame {
         for (int i = 1; i <= lanes; i++) {
             c.gridx = 0; c.anchor = GridBagConstraints.LINE_END;
             horseInputPanel.add(new JLabel("Horse " + i + " name:"), c);
-
             c.gridx = 1; c.anchor = GridBagConstraints.LINE_START;
             horseInputPanel.add(new JTextField("Horse"+i,10), c);
 
             c.gridx = 2; c.anchor = GridBagConstraints.LINE_END;
             horseInputPanel.add(new JLabel("Conf (0–1):"), c);
-
             c.gridx = 3; c.anchor = GridBagConstraints.LINE_START;
             horseInputPanel.add(new JTextField("0.7",5), c);
 
             c.gridy++;
         }
+
         horseInputPanel.revalidate();
         horseInputPanel.repaint();
         pack();
     }
 
-    // collect inputs and start the race
+    // Collect inputs, disable controls, and kick off the race animation
     private void onStart() {
-        int length = (Integer)lengthCombo.getSelectedItem();
-        int lanes  = (Integer)laneCombo.getSelectedItem();
-
+        int trackLen = (Integer)lengthCombo.getSelectedItem();
         List<Horse> horses = new ArrayList<>();
         Component[] comps = horseInputPanel.getComponents();
+
         for (int i = 0; i < comps.length; i += 4) {
             String name = ((JTextField)comps[i+1]).getText().trim();
             double conf;
@@ -121,31 +118,30 @@ public class RaceGUI extends JFrame {
             horses.add(new Horse(name.charAt(0), name, conf));
         }
 
-        // disable inputs during race
         laneCombo.setEnabled(false);
         lengthCombo.setEnabled(false);
         for (Component comp : horseInputPanel.getComponents())
             comp.setEnabled(false);
         startBtn.setEnabled(false);
 
-        // start animation, re-enable when done
-        trackPanel.setupRace(horses, length, () -> {
+        trackPanel.setupRace(horses, trackLen, () -> {
             laneCombo.setEnabled(true);
             lengthCombo.setEnabled(true);
             for (Component comp : horseInputPanel.getComponents())
                 comp.setEnabled(true);
             startBtn.setEnabled(true);
         });
+
         pack();
     }
 
-    // -------------------------------------------------------------------
-    // Panel that draws and animates the horses
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Panel responsible for drawing and animating the race
+    // ------------------------------------------------------------------
     private static class TrackPanel extends JPanel {
         private List<Horse> horses;
         private int trackLen;
-        private Timer timer;        // javax.swing.Timer
+        private Timer timer;           // javax.swing.Timer
         private Runnable onFinish;
 
         public TrackPanel() {
@@ -163,21 +159,20 @@ public class RaceGUI extends JFrame {
             timer.start();
         }
 
-        // called on each tick
+        // one tick of the animation
         private void step() {
             for (Horse h : horses) {
                 if (!h.hasFallen()) {
+                    // move forward based on confidence
                     if (Math.random() < h.getConfidence()) {
                         h.moveForward();
-                        // increase confidence slightly
-                        h.setConfidence(Math.min(1, h.getConfidence() + 0.01));
+                        h.setConfidence(Math.min(1, h.getConfidence()+0.01));
                     }
-                    // much rarer falls
-                    double fallProb = 0.02 * h.getConfidence() * h.getConfidence();
+                    // very rare fall
+                    double fallProb = 0.01 * h.getConfidence()*h.getConfidence();
                     if (Math.random() < fallProb) {
                         h.fall();
-                        // decrease confidence
-                        h.setConfidence(Math.max(0, h.getConfidence() - 0.1));
+                        h.setConfidence(Math.max(0, h.getConfidence()-0.1));
                     }
                 }
             }
@@ -193,7 +188,7 @@ public class RaceGUI extends JFrame {
                 String msg;
                 if (anyWin) {
                     Horse win = horses.stream()
-                            .filter(h -> h.getDistanceTravelled() >= trackLen)
+                            .filter(h->h.getDistanceTravelled()>=trackLen)
                             .findFirst().get();
                     msg = "🏆 " + win.getName() + " wins!";
                 } else {
@@ -220,27 +215,35 @@ public class RaceGUI extends JFrame {
                 g.drawLine(10, y, 10 + trackLen, y);
             }
 
-            // draw horses
+            Graphics2D g2 = (Graphics2D) g;
+            Font emojiFont = new Font("Segoe UI Emoji", Font.PLAIN, 40);
+
             for (int i = 0; i < lanes; i++) {
                 Horse hr = horses.get(i);
                 int x = 10 + hr.getDistanceTravelled();
                 int y = (i+1) * laneY;
 
                 if (hr.hasFallen()) {
-                    // fallen marker
-                    g.setFont(new Font("SansSerif", Font.BOLD, 20));
-                    g.setColor(Color.RED);
-                    g.drawString("❌", x-8, y+8);
+                    // draw ❌ at the fall position
+                    g2.setFont(new Font("SansSerif", Font.BOLD, 40));
+                    g2.setColor(Color.RED);
+                    g2.drawString("❌", x-20, y+20);
                 } else {
-                    // moving circle
-                    g.setColor(new Color(50,50,200));
-                    g.fillOval(x, y-8, 16,16);
+                    // flip 🐎 horizontally
+                    String horse = "🐎";
+                    g2.setFont(emojiFont);
+                    int fw = g2.getFontMetrics().stringWidth(horse);
+                    AffineTransform old = g2.getTransform();
+                    g2.translate(x + fw, y - 20);
+                    g2.scale(-1, 1);
+                    g2.drawString(horse, 0, 0);
+                    g2.setTransform(old);
                 }
 
-                // draw name next to horse
-                g.setFont(new Font("SansSerif",Font.PLAIN,12));
-                g.setColor(Color.BLACK);
-                g.drawString(hr.getName(), x + 20, y + 4);
+                // horse name
+                g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+                g2.setColor(Color.BLACK);
+                g2.drawString(hr.getName(), x + 30, y);
             }
         }
     }
